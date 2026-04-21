@@ -5,54 +5,87 @@ on:
 
 jobs:
   create-repository:
+    # Só executa se a issue começar com o prefixo do nosso formulário
     if: startsWith(github.event.issue.title, '[Novo Projeto]')
     runs-on: ubuntu-latest
+    
     steps:
-      # 1. Log de Início
+      # 1. Inicializa o ambiente Git no Runner
+      - name: Checkout Template
+        uses: actions/checkout@v4
+
+      # 2. Log inicial na Issue
       - name: Add Start Comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh issue comment ${{ github.event.issue.number }} \
-            --body "⏳ **Iniciando a configuração...** O repositório está a ser provisionado na VojoLabs."
+            --body "⏳ **Iniciando a configuração...** O repositório está sendo provisionado na organização **VojoLabs**."
 
-      # 2. Lógica de Criação (com a limpeza de nome robusta)
-      - name: Create Repo
+      # 3. Processo de Criação e Configuração
+      - name: Create and Configure Repo
         id: create_step
         env:
           GH_TOKEN: ${{ secrets.GHA_TOKEN }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
+          # Extração limpa do nome do repo (remove espaços e quebras de linha)
           REPO_NAME=$(echo "$ISSUE_BODY" | grep -A 1 "Qual o nome do novo repositório?" | tail -n 1 | sed 's/[[:space:]]//g')
           
           if [ -z "$REPO_NAME" ] || [ "$REPO_NAME" = "_Noresponse_" ]; then
-            echo "Erro: Nome vazio" && exit 1
+            echo "ERRO: Nome do repositório não encontrado no corpo da issue." && exit 1
           fi
 
+          # Exporta para os próximos passos usarem
           echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
-          
-          gh repo create "VojoLabs/$REPO_NAME" --template "VojoLabs/template-infra-aws" --public --clone
-          
-          cd "$REPO_NAME"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b develop
-          git push origin develop
 
-      # 3. Log de Sucesso (Só roda se tudo der certo)
+          echo "🚀 Criando: VojoLabs/$REPO_NAME"
+
+          # Cria o repositório a partir do template
+          gh repo create "VojoLabs/$REPO_NAME" \
+            --template "VojoLabs/template-infra-aws" \
+            --public \
+            --clone
+
+          # Entra no diretório e configura branches
+          if [ -d "$REPO_NAME" ]; then
+            cd "$REPO_NAME"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            
+            # Garante a existência da main e cria a develop
+            git checkout main || git checkout -b main
+            git checkout -b develop
+            git push origin develop
+          else
+            echo "ERRO: Falha ao clonar o repositório recém-criado." && exit 1
+          fi
+
+      # 4. Log de Sucesso (com link direto)
       - name: Success Comment
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh issue close ${{ github.event.issue.number }} \
-            --comment "✅ **Repositório criado!** 🔗 https://github.com/VojoLabs/${{ env.REPO_NAME }}"
+            --comment "✅ **Repositório criado com sucesso!**
+            
+            🔗 [Acessar novo repositório](https://github.com/VojoLabs/${{ env.REPO_NAME }})
+            
+            **Detalhes:**
+            - Organização: \`VojoLabs\`
+            - Branches: \`main\`, \`develop\`"
 
-      # 4. Log de Erro (Só roda se algum step anterior falhar)
+      # 5. Log de Erro (avisa se algo falhar)
       - name: Error Comment
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh issue comment ${{ github.event.issue.number }} \
-            --body "❌ **Erro na configuração:** Não foi possível criar o repositório. Por favor, verifique se o nome já existe ou se as permissões do Token estão corretas."
+            --body "❌ **Erro na configuração:** Não foi possível concluir a criação do repositório. 
+            
+            **Possíveis causas:**
+            1. O nome \`${{ env.REPO_NAME }}\` já existe na organização.
+            2. O \`GHA_TOKEN\` expirou ou não tem permissão de escrita em organizações.
+            3. O nome do repositório contém caracteres inválidos."
