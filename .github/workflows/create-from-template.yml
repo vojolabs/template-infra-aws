@@ -5,12 +5,25 @@ on:
 
 jobs:
   create-repository:
-    if: startsWith(github.event.issue.title, '[Novo Projeto]')
+    # Garante que só rode para issues abertas via template específico
+    if: startsWith(github.event.issue.title, 'Template')
     runs-on: ubuntu-latest
     
+    permissions:
+      issues: write
+      contents: read
+
     steps:
       - name: Checkout Template
         uses: actions/checkout@v4
+
+      - name: Parse Issue Body
+        id: parse
+        uses: peter-murray/issue-forms-body-parser@v3
+        with:
+          issue_id: ${{ github.event.issue.number }}
+          separator: '###'
+          label_marker: '###'
 
       - name: Add Start Comment
         env:
@@ -23,45 +36,38 @@ jobs:
         id: create_step
         env:
           GH_TOKEN: ${{ secrets.GHA_TOKEN }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
+          # Extrai o valor do ID 'nome_repo' definido no seu arquivo de formulário
+          REPO_NAME: ${{ fromJson(steps.parse.outputs.payload).nome_repo }}
         run: |
-          # Extract repo name from form field - handle various formatting
-          REPO_NAME=$(echo "$ISSUE_BODY" | sed -n '/Qual o nome do novo repositório?/,/^$/p' | tail -n +2 | head -n 1 | xargs)
-          
-          # Validate that REPO_NAME was extracted
           if [ -z "$REPO_NAME" ]; then
-            echo "❌ Failed to extract repository name from issue"
+            echo "❌ Erro: Não foi possível extrair o nome do repositório."
             exit 1
           fi
           
-          echo "Repository name: $REPO_NAME"
-          
-          # Define destination
+          echo "Nome do repositório: $REPO_NAME"
           DESTINATION="${{ github.repository_owner }}/$REPO_NAME"
           
-          # Create repository from template
+          # Cria o repositório a partir do template
           gh repo create "$DESTINATION" \
             --template "${{ github.repository }}" \
             --public \
             --clone
           
-          # Enter directory, create develop branch and push
+          # Configura branch develop
           cd "$REPO_NAME"
           git checkout -b develop
           git push origin develop
-          else
-            echo "ERRO: O repositório não foi clonado corretamente." && exit 1
-          fi
 
       - name: Success Comment
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ fromJson(steps.parse.outputs.payload).nome_repo }}
         run: |
           gh issue close ${{ github.event.issue.number }} \
             --comment "✅ **Repositório criado com sucesso!**
             
-            🔗 [Acessar novo repositório](https://github.com/VojoLabs/${{ env.REPO_NAME }})
+            🔗 [Acessar novo repositório](https://github.com/VojoLabs/$REPO_NAME)
             
             **Detalhes:**
             - Organização: \`VojoLabs\`
@@ -72,14 +78,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Se REPO_NAME estiver vazio, usamos um fallback para o log não ficar feio
-          DISPLAY_NAME="${{ env.REPO_NAME }}"
-          if [ -z "$DISPLAY_NAME" ]; then DISPLAY_NAME="indefinido"; fi
-
           gh issue comment ${{ github.event.issue.number }} \
-            --body "❌ **Erro na configuração:** Não foi possível criar o repositório \`$DISPLAY_NAME\`.
+            --body "❌ **Erro na configuração:** Não foi possível criar o repositório.
             
             **Verificações sugeridas:**
             1. O nome já existe na organização **VojoLabs**?
-            2. O seu Personal Access Token (**GHA_TOKEN**) ainda é válido?
+            2. O GHA_TOKEN possui permissões de criação de repositório?
             3. O nome digitado possui caracteres proibidos (espaços, acentos)?"
