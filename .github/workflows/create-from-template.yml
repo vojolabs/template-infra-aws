@@ -60,6 +60,20 @@ jobs:
           # Configura branch develop
           cd "$REPO_NAME"
 
+          # --- LÓGICA DE TROCA DO README ---
+          # Se o arquivo reserva existir, substitui o README atual
+          if [ -f "TEMPLATE_README.md" ]; then
+            mv TEMPLATE_README.md README.md
+            echo "✅ README do projeto configurado."
+          fi
+
+          # --- LIMPEZA DOS ARQUIVOS DE TEMPLATE ---
+          # Remove a pasta de templates de issues
+          rm -rf .github/ISSUE_TEMPLATE
+          
+          # Remove o workflow de criação de repositório (ajuste o nome do arquivo se for diferente)
+          rm -f .github/workflows/create-from-template.yml
+
           # Configura o Git para usar o seu token na URL remota
           # Isso evita o erro de "could not read Username"
           git remote set-url origin "https://x-access-token:${{ secrets.GHA_TOKEN }}@github.com/$DESTINATION.git"
@@ -67,6 +81,10 @@ jobs:
           # Configura identidade básica (necessário para commits/pushes)
           git config user.name "VojoLabs Bot"
           git config user.email "bot@vojolabs.org"
+
+          git add .
+          git commit -m "chore: setup inicial"
+          git push origin main
 
           git checkout -b develop
           git push origin develop
